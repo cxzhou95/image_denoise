@@ -1,0 +1,13 @@
+!!python/object:argparse.Namespace
+save_dir: exp/first-try
+batch_size: 128
+num_workers: 8
+patch_size: 40
+noise_mean: 0
+noise_std: 25
+num_patches: 512
+trainset_path: data/BSDS500
+testset_path: data/BSD68
+total_epochs: 50
+initial_lr: 0.001
+final_lr: 0.0001

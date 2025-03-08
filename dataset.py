@@ -33,27 +33,55 @@ def add_gaussian_noise(img, mean, std):
     noisy_image = np.clip(noisy_image, 0, 1)
     return noisy_image
 
+# dataset train test 不通用
+# train: augmentation
+# test: no aug
+
+
+##### 测试用的模拟数据，没有带噪声的图像，我们是在干净图像上加噪声来模拟输入的
+##### 测试结果不一致，因为每次的噪声都是随机的
+##### 每张图多随机几次，保存img1_noise1, img1_noise2, ..., img1_noiseN
 
 class DenoisingDataset(Dataset):
-    def __init__(self, image_dir, patch_size=40, mean=0, sigma=25, num_patches=1600):
+    def __init__(self, image_dir, phase='train', patch_size=40, mean=0, sigma=25, num_patches=512, debug=False):
         self.image_paths = glob.glob(os.path.join(image_dir, "*.jpg")) + glob.glob(os.path.join(image_dir, "*.png"))
         self.patch_size = patch_size
+        self.phase = phase
+        # normalize noise level
         self.mean = mean / 255.0
-        self.sigma = sigma / 255.0  # normalize noise level
+        self.sigma = sigma / 255.0
         self.num_patches = num_patches  # each image will generate multiple patches
 
+        self.debug = debug
+
     def __len__(self):
-        return len(self.image_paths) * self.num_patches
+
+        if self.phase == 'train':
+            if self.debug:
+                return len(self.image_paths) * self.num_patches[:10]
+            else:
+                return len(self.image_paths) * self.num_patches
+        else:
+            if self.debug:
+                return len(self.image_paths)[:10]
+            else:
+                return len(self.image_paths)
+
 
     def __getitem__(self, index):
         # load and preprocess image
         img_index = index % len(self.image_paths)  # ensure index loops over images
         img_path = self.image_paths[img_index]
+        img_name = os.path.basename(img_path)
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
 
         img = img.astype(np.float32) / 255.0  # normalize
-        # apply augmentations
-        patch = augmentation(img, self.patch_size)  # extract patch
+
+        if self.phase == 'train':
+            # apply augmentations
+            patch = augmentation(img, self.patch_size)  # extract patch
+        else:
+            patch = img
 
         # add Gaussian noise
         noisy_patch = add_gaussian_noise(patch, self.mean, self.sigma)
@@ -62,4 +90,20 @@ class DenoisingDataset(Dataset):
         noisy_patch = torch.from_numpy(np.expand_dims(noisy_patch, axis=0)).float()
         patch = torch.from_numpy(np.expand_dims(patch, axis=0)).float()
 
-        return noisy_patch, patch  # return (noisy image, clean image)
+        return noisy_patch, patch, img_name  # img_name: list, len(img_name) = batchsize
+
+
+if __name__ == '__main__':
+    os.makedirs('./test_dataloader/', exist_ok=True)
+    trainset = DenoisingDataset(image_dir='data/BSDS500', phase='train')
+    dataloader = DataLoader(trainset, batch_size=128, shuffle=True, num_workers=8, pin_memory=True)
+
+    noisy_patch, patch, img_name = next(iter(dataloader))
+    print(f'noisy_patch shape: {noisy_patch.shape}')
+    print(f'patch shape: {patch.shape}')
+
+    noisy_patch = noisy_patch[0].numpy().transpose(1, 2, 0)
+    patch = patch[0].numpy().transpose(1, 2, 0)
+
+    cv2.imwrite('./test_dataloader/noisy_patch.png', np.uint8(noisy_patch * 255))
+    cv2.imwrite('./test_dataloader/patch.png', np.uint8(patch * 255))
